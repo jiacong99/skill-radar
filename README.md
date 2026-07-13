@@ -1,88 +1,80 @@
-# 📡 Skill Radar — AI Intel Dashboard (skills / repos / news)
+# 📡 Skill Radar
 
-A **local-first, open-source** AI intelligence hub: it pulls the past 7 days' notable
-**skills**, **high-star AI open-source projects**, and **Dev AI news** into a markdown
-archive, with a **no-login** dashboard to browse, search, and track them.
+A **local-first**, skills-only dashboard for your AI agent skills. It scans the skill
+folders of your local agent runners (Claude Code, Codex, …), shows them next to a curated
+whitelist and anything you've searched for, and lets you search GitHub and install new
+skills — all from your machine. No login, no server, no data leaves your computer.
 
-- **Shared data** (name / path / stars / description / last update / latest version /
-  per-role importance) lives in `data/*.md`, travels with the repo, usable by anyone who
-  clones it.
-- **Personal data** (what's installed on your machine, ignore / keep-track marks, the
-  selected role, search prefs) lives in the **browser's localStorage** — never in markdown.
-- **Data collection** does not run locally and calls no LLM API: a **cloud Claude routine**
-  (`/schedule`) runs on a schedule or on manual trigger to collect + rate + write + push.
-  The dashboard only **reads** and **scans the local machine's installs**.
+## What it does
+- **Detects installed skills** across every agent runner it finds locally (Claude Code
+  `~/.claude/skills` + plugins, Codex `~/.codex/skills`, and any directory you add).
+- **Shows a whitelist** you curate by hand in `data/whitelist.md` — with free-text
+  **audience tags** (who each skill suits: PM / BA / SE / QA / …). The UI has **no
+  create/edit** for the whitelist; you change it by editing the file.
+- **Searches GitHub** on demand for skills, opens a **detail page** with the rendered
+  README, and installs the ones you want (git clone into the folder you pick).
+- **Never deletes for you.** The 🗑 button opens a guide showing the skill's folder and the
+  `rm` command to run yourself (plugins point you to `/plugin` instead).
 
-## Roles
-On entry, pick **Developer** or **UIUX** — the same data shows "importance" from the chosen
-perspective. Switch any time from the top bar.
+Skills show up in one of three categories:
+
+| Category | Meaning |
+|---|---|
+| **Installed** | Found on this machine in a detected skills directory |
+| **Whitelist** | Curated in `data/whitelist.md` (edit the file to change) |
+| **Searched** | A GitHub result you saved but didn't install |
 
 ## Pages
-- `/` — pick a role.
-- `/dashboard` — overview (status counts, role-weighted top skills, recent news).
-- `/skills` — main skills list: **search & filter** (keyword / status / importance),
-  sort (stars / importance / last update, asc·desc·off), **Sync Skills**,
-  **Add Skill** (modal, with optional auto-commit), and per-row sync / enable·disable / delete.
-- `/repos` — high-star AI open-source projects.
-- `/news` — Dev AI news.
+- `/skills` — the main table: installed + whitelist + searched, with keyword / category /
+  audience filters, install, update, and the delete guide.
+- `/skills/search` — search GitHub for skills.
+- `/skills/<owner>/<repo>` — a skill's detail: rendered README + install / save.
+- `/directories` — the skill directories per runner; add your own or create a missing one.
 
-Global controls (top bar): **light / dark theme** and **language (EN / 中文, default EN)**.
-
-## Importance scale
-Per-role (Developer / UIUX), set by the routine:
-🟢 very important · 🔵 needed · 🟠 maybe needed · ⚫️ not needed.
-
-## Skill status
-| Status | Meaning |
-|---|---|
-| `installed` | Installed on this machine (from Sync Skills, stored in browser) |
-| `open` | On the market, not installed, not disabled |
-| `pending` | A link you added manually, awaiting the next routine to enrich |
-| `disabled` | You disabled it — bulk **Sync Skills** skips it (still manually syncable) |
-
-## Local actions (full-auto, local only)
-**Sync Skills** installs/updates every non-disabled git skill on your machine;
-per-row **sync** / **upgrade** / **delete** act on one skill (delete removes its
-`~/.claude/skills/<name>` files, with a confirm). These run git on your machine and
-only work locally — on a server they degrade with a clear message. Plugins/MCP can't
-be auto-installed via shell and are reported with the command to run instead.
+Top-bar controls: **light / dark theme** and **language (EN / 中文, default EN)**.
 
 ## Run locally
 ```bash
 npm install
-npm run dev      # http://localhost:3000
+npm run dev        # http://localhost:5959
 # or production:
 npm run build && npm run start
 ```
-- No `GITHUB_TOKEN`, no login (the app does not crawl GitHub locally).
-- **Sync Skills** scans this machine's `~/.claude` (the skills dir,
-  `installed_plugins.json`, `known_marketplaces.json`) to detect installs and versions —
-  **only meaningful when running locally**.
+It runs on **port 5959** (chosen to not collide with the usual :3000 dev servers).
 
-## Updating data (cloud routine)
-There is no local "crawl now". To get fresh data:
-1. Push the repo to GitHub.
-2. Per [`scripts/routine.md`](scripts/routine.md), create a daily 08:00 routine via
-   `/schedule` (or trigger one manually).
-3. The routine: pull → collect 3 sources → enrich pending → rate by Developer/UIUX →
-   write `data/*.md` → commit & push.
-4. Refresh the dashboard locally to see the new data.
+- **No login. No data collection server.** Everything is read/scanned locally on demand.
+- **GitHub search works unauthenticated** (subject to GitHub's low anonymous rate limit).
+  To raise the limit, export a token in your environment before starting:
+  ```bash
+  export GITHUB_TOKEN=ghp_xxx   # optional; read from env only, never written to any file
+  ```
 
-## Deploy to Vercel (optional, future)
-It can be deployed as a read-only board, but note:
-- **Sync Skills / sync / upgrade / delete** can't reach a visitor's `~/.claude` on a
-  server → they degrade to "local only".
-- **Add Skill** needs to write `data/skills.md`; serverless filesystems are read-only
-  → it degrades with a clear message.
-- If `data/*.md` is missing, pages show an empty state instead of erroring.
+## Public vs private data
+- **Public (in git):** `data/whitelist.md` — the curated skill list you hand-maintain.
+- **Private (gitignored, per-machine):**
+  - `data/searched.md` — GitHub results you saved without installing.
+  - `data/local-dirs.md` — custom skill directories you added on the Directories page.
+- **Nothing about what you have installed is written to the repo** — installed skills are
+  scanned live from disk each time you load the page.
 
-## Data format
-`data/*.md` are plain markdown tables (human-readable + parsed by `lib/db.ts`). Column
-specs are in each file's first lines and in [`scripts/routine.md`](scripts/routine.md).
+A fresh `git clone` runs with just `data/whitelist.md`; the private files are created the
+first time you add a searched entry or a custom directory.
+
+## Editing the whitelist
+Open `data/whitelist.md` and edit the table:
+
+```
+| name | github_path | description | tags | remark |
+| gstack | garrytan/gstack | Claude Code engineering skills. | SE | |
+```
+
+- `name` — display name; also the key that matches an installed skill folder.
+- `github_path` — `owner/repo`, used by the Install button.
+- `tags` — comma-separated audience labels, any values you like.
+- Reload the page to see changes. There is deliberately no UI to edit this file.
 
 ## Stack
-Next.js 14 (App Router, TS) · markdown as the database · no backend DB · no login.
+Next.js 14 (App Router, TypeScript) · markdown as the data store · no backend DB · no login.
 
-> Note: `npm audit` may flag advisories only fixable by upgrading to Next 16, which
-> requires Node 20+. As a local board with no untrusted input, this stays on Next 14.2.x
-> (compatible with Node 18.17). To clear them, move to Node 20 + `npm i next@latest`.
+> `npm audit` may flag advisories only fixable by upgrading to Next 16 (Node 20+). As a
+> local board with no untrusted input, this stays on Next 14.2.x (Node 18.17-compatible).
