@@ -1,18 +1,30 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import Nav from "./components/Nav";
+import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
+import Shell from "./components/Shell";
+
+// Three deliberate roles: Space Grotesk = display/brand, Inter = body,
+// JetBrains Mono = instrument readouts (versions, paths, stars).
+const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display", display: "swap" });
+const body = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Skill Radar — AI 情报 Dashboard",
-  description: "明星 skills / 高星 AI 项目 / Dev AI 新闻，本地优先、markdown 当 DB。",
+  title: "Skill Radar",
+  description: "A local-first dashboard for your AI agent skills: detect installed, keep a whitelist, search GitHub, install.",
 };
+
+// Set the theme before first paint to avoid a flash of the wrong palette.
+const noFlash = `(function(){try{var t=localStorage.getItem('gs.theme');document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh">
+    <html lang="en" data-theme="light" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: noFlash }} />
+      </head>
       <body>
-        <Nav />
-        <div className="container">{children}</div>
+        <Shell>{children}</Shell>
       </body>
     </html>
   );

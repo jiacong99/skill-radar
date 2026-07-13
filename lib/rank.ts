@@ -1,103 +1,7 @@
-// Pure logic: status computation, latest-version check, importance, sort & filter.
+// Pure logic: merge the three skill sources into one view, filter, sort.
 // No browser/node APIs — safe on both server and client.
 
-import type { SkillRow, RepoRow, Role, Importance, Status, LocalSkillInfo } from "./types";
-
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-
-export interface PersonalSkillState {
-  ignored?: boolean;
-  keepTrack?: boolean;
-}
-
-export function isExpired(lastUpdate: string): boolean {
-  if (!lastUpdate) return false;
-  const t = Date.parse(lastUpdate);
-  if (Number.isNaN(t)) return false;
-  return Date.now() - t > ONE_YEAR_MS;
-}
-
-export function computeStatus(
-  skill: SkillRow,
-  local: LocalSkillInfo | undefined,
-  personal: PersonalSkillState | undefined
-): Status {
-  if (skill.status === "pending") return "pending";
-  if (personal?.ignored) return "cancelled";
-  if (local?.installed) return "active";
-  if (isExpired(skill.last_update)) return "expired";
-  return "open";
-}
-
-export type LatestState = "n/a" | "unknown" | "latest" | "outdated";
-
-export function latestState(skill: SkillRow, local: LocalSkillInfo | undefined): LatestState {
-  if (!local?.installed) return "n/a";
-  if (!skill.latest_version) return "unknown";
-  if (!local.version) return "unknown";
-  return normalizeVer(local.version) === normalizeVer(skill.latest_version) ? "latest" : "outdated";
-}
-
-function normalizeVer(v: string): string {
-  return (v || "").trim().replace(/^v/i, "");
-}
-
-export function importanceFor(row: { importance_developer: Importance; importance_uiux: Importance }, role: Role): Importance {
-  return role === "uiux" ? row.importance_uiux : row.importance_developer;
-}
-
-// For sorting: ⚫️ > 🟠 > 🔵 > 🟢 > 空
-export function importanceRank(imp: Importance): number {
-  switch (imp) {
-    case "⚫️":
-      return 4;
-    case "🟠":
-      return 3;
-    case "🔵":
-      return 2;
-    case "🟢":
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-export type SortBy = "stars" | "updated";
-
-export function sortRows<T extends { stars: number; last_update: string }>(rows: T[], by: SortBy): T[] {
-  const out = [...rows];
-  if (by === "stars") {
-    out.sort((a, b) => b.stars - a.stars);
-  } else {
-    out.sort((a, b) => (Date.parse(b.last_update) || 0) - (Date.parse(a.last_update) || 0));
-  }
-  return out;
-}
-
-export interface SkillFilters {
-  search?: string;
-  status?: Status | "all";
-  importance?: Importance | "all";
-}
-
-// Filter skills. `statusOf` resolves each row's live status (needs personal/local state).
-export function filterSkills(
-  rows: SkillRow[],
-  filters: SkillFilters,
-  role: Role,
-  statusOf: (s: SkillRow) => Status
-): SkillRow[] {
-  const q = (filters.search || "").trim().toLowerCase();
-  return rows.filter((s) => {
-    if (q) {
-      const hay = `${s.name} ${s.description} ${s.github_path}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    if (filters.status && filters.status !== "all" && statusOf(s) !== filters.status) return false;
-    if (filters.importance && filters.importance !== "all" && importanceFor(s, role) !== filters.importance) return false;
-    return true;
-  });
-}
+import type { InstalledSkill, WhitelistSkill, SearchedSkill, SkillView } from "./types";
 
 // "owner/repo" -> https url
 export function githubUrl(p: string): string {
@@ -105,32 +9,117 @@ export function githubUrl(p: string): string {
   return `https://github.com/${p.replace(/^\/+/, "")}`;
 }
 
-// Suggested install command for the sync action.
-export function syncCommand(skill: SkillRow): string {
-  const url = githubUrl(skill.github_path);
-  if (skill.kind === "plugin") return `# Claude Code 里运行：\n/plugin install ${skill.name}`;
-  if (skill.kind === "mcp") return `# 参考该 repo README 配置 MCP server：\n${url}`;
-  // default: clone into ~/.claude/skills
-  return `git clone ${url} ~/.claude/skills/${skill.name}`;
+function repoKey(p: string): string {
+  let s = (p || "").trim().replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  s = s.replace(/\.git$/i, "").replace(/\/$/, "");
+  const parts = s.split("/").filter(Boolean);
+  return (parts.length >= 2 ? `${parts[0]}/${parts[1]}` : s).toLowerCase();
 }
 
-export function statusLabel(s: Status): string {
-  switch (s) {
-    case "pending":
-      return "pending（待补全）";
-    case "active":
-      return "active（已装）";
-    case "cancelled":
-      return "cancelled（已忽略）";
-    case "expired":
-      return "expired（过期）";
-    case "open":
-      return "open（在架未装）";
-    default:
-      return "unknown";
+// Merge installed + whitelist + searched into one deduped list of view rows.
+// Precedence: an installed skill absorbs matching whitelist tags/remark; a
+// whitelist row that isn't installed stands on its own; a searched entry only
+// appears when it isn't already installed or whitelisted.
+export function buildSkillViews(
+  installed: InstalledSkill[],
+  whitelist: WhitelistSkill[],
+  searched: SearchedSkill[]
+): SkillView[] {
+  const list: SkillView[] = [];
+  const byName = new Map<string, SkillView>();
+  const byRepo = new Map<string, SkillView>();
+
+  const index = (v: SkillView) => {
+    byName.set(v.name.toLowerCase(), v);
+    if (v.github_path) byRepo.set(repoKey(v.github_path), v);
+  };
+  const find = (name: string, repo: string): SkillView | undefined =>
+    byName.get(name.toLowerCase()) || (repo ? byRepo.get(repoKey(repo)) : undefined);
+
+  for (const s of installed) {
+    const v: SkillView = {
+      name: s.name, github_path: s.github_path, description: s.description, category: "installed",
+      installed: true, provider: s.provider, providerLabel: s.providerLabel, dir: s.dir,
+      version: s.version, source: s.source, tags: [], stars: 0, remark: "",
+    };
+    list.push(v);
+    index(v);
   }
+
+  for (const w of whitelist) {
+    const match = find(w.name, w.github_path);
+    if (match) {
+      if (w.tags.length) match.tags = w.tags;
+      if (!match.remark) match.remark = w.remark;
+      if (!match.description) match.description = w.description;
+      if (!match.github_path) match.github_path = w.github_path;
+      continue;
+    }
+    const v: SkillView = {
+      name: w.name, github_path: w.github_path, description: w.description, category: "whitelist",
+      installed: false, tags: w.tags, stars: 0, remark: w.remark,
+    };
+    list.push(v);
+    index(v);
+  }
+
+  for (const e of searched) {
+    const match = find(e.name || repoKey(e.github_path).split("/").pop() || "", e.github_path);
+    if (match) {
+      if (!match.remark) match.remark = e.remark;
+      if (!match.stars) match.stars = e.stars;
+      continue;
+    }
+    const v: SkillView = {
+      name: e.name || repoKey(e.github_path).split("/").pop() || e.github_path,
+      github_path: e.github_path, description: e.description, category: "searched",
+      installed: false, tags: [], stars: e.stars, remark: e.remark,
+    };
+    list.push(v);
+    index(v);
+  }
+
+  return list;
 }
 
-export function repoSorter(rows: RepoRow[], by: SortBy): RepoRow[] {
-  return sortRows(rows, by);
+export type CategoryFilter = "all" | "installed" | "whitelist" | "searched";
+export type SortBy = "name" | "stars";
+export type SortDir = "none" | "asc" | "desc";
+
+export interface SkillFilters {
+  search?: string;
+  category?: CategoryFilter;
+  tag?: string; // "all" or a specific tag
+}
+
+export function allTags(rows: SkillView[]): string[] {
+  const set = new Set<string>();
+  for (const r of rows) for (const t of r.tags) set.add(t);
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+export function filterSkills(rows: SkillView[], f: SkillFilters): SkillView[] {
+  const q = (f.search || "").trim().toLowerCase();
+  const cat = f.category || "all";
+  const tag = f.tag || "all";
+  return rows.filter((s) => {
+    if (cat !== "all" && s.category !== cat) return false;
+    if (tag !== "all" && !s.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) return false;
+    if (q) {
+      const hay = `${s.name} ${s.description} ${s.github_path} ${s.tags.join(" ")}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+export function sortSkills(rows: SkillView[], by: SortBy, dir: SortDir): SkillView[] {
+  if (dir === "none") return rows;
+  const out = [...rows];
+  const cmp = (a: SkillView, b: SkillView) => {
+    if (by === "stars") return (a.stars || 0) - (b.stars || 0);
+    return a.name.localeCompare(b.name);
+  };
+  out.sort((a, b) => (dir === "asc" ? cmp(a, b) : -cmp(a, b)));
+  return out;
 }

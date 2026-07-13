@@ -1,64 +1,88 @@
-# 📡 Skill Radar — Skills 集中营 / AI 情报 Dashboard
+# 📡 Skill Radar — AI Intel Dashboard (skills / repos / news)
 
-一个**本地优先、开源**的 AI 情报中枢：把过去 7 天的明星 **skills**、**高星 AI 开源项目**、
-**Dev AI 新闻** 收进一份 markdown 档案，配一个**无需 login** 的 dashboard 查看、搜索、跟进。
+A **local-first, open-source** AI intelligence hub: it pulls the past 7 days' notable
+**skills**, **high-star AI open-source projects**, and **Dev AI news** into a markdown
+archive, with a **no-login** dashboard to browse, search, and track them.
 
-- **共同数据**（名字 / 路径 / 星数 / 描述 / 更新时间 / 最新版本 / 各角色重要度）→ 存在 `data/*.md`，
-  随 repo 走，谁 clone 都能用。
-- **个人数据**（本机装了哪些、ignore / keep-track 标记、选的角色、搜索偏好）→ 存在**浏览器 localStorage**，
-  不进 markdown。
-- **数据采集** 不在本地做，也不调任何 LLM API：由**云端 Claude routine**（`/schedule`）定时或手动触发，
-  采集 + 评级 + 写档 + push。本地只负责**读** + **扫本机已装情况**。
+- **Shared data** (name / path / stars / description / last update / latest version /
+  per-role importance) lives in `data/*.md`, travels with the repo, usable by anyone who
+  clones it.
+- **Personal data** (what's installed on your machine, ignore / keep-track marks, the
+  selected role, search prefs) lives in the **browser's localStorage** — never in markdown.
+- **Data collection** does not run locally and calls no LLM API: a **cloud Claude routine**
+  (`/schedule`) runs on a schedule or on manual trigger to collect + rate + write + push.
+  The dashboard only **reads** and **scans the local machine's installs**.
 
-## 角色
-进站先选 **Developer** 或 **UIUX**——同一份数据会按你选的视角显示「重要度」。顶栏随时切换。
+## Roles
+On entry, pick **Developer** or **UIUX** — the same data shows "importance" from the chosen
+perspective. Switch any time from the top bar.
 
-## 页面
-- `/` —— 选角色。
-- `/dashboard` —— 总览（各状态计数、按角色的重点 skills、最近新闻）。
-- `/skills` —— skills 主列表：**search & filter**、排序、**Check local skills**、**加 GitHub link**、每行 sync / ignore / keep-track。
-- `/repos` —— 高星 AI 开源项目。
-- `/news` —— Dev AI 新闻。
+## Pages
+- `/` — pick a role.
+- `/dashboard` — overview (status counts, role-weighted top skills, recent news).
+- `/skills` — main skills list: **search & filter** (keyword / status / importance),
+  sort (stars / importance / last update, asc·desc·off), **Sync Skills**,
+  **Add Skill** (modal, with optional auto-commit), and per-row sync / enable·disable / delete.
+- `/repos` — high-star AI open-source projects.
+- `/news` — Dev AI news.
 
-## Skill 状态
-| 状态 | 含义 |
+Global controls (top bar): **light / dark theme** and **language (EN / 中文, default EN)**.
+
+## Importance scale
+Per-role (Developer / UIUX), set by the routine:
+🟢 very important · 🔵 needed · 🟠 maybe needed · ⚫️ not needed.
+
+## Skill status
+| Status | Meaning |
 |---|---|
-| `active` | 本机已装（来自 Check local skills，存浏览器） |
-| `open` | 在架（更新 < 1 年）、未装、未忽略 |
-| `pending` | 你手动加的 link，等下次 routine 补全详情 |
-| `expired` | 上次更新 > 1 年 |
-| `cancelled` | 你标了 ignore |
+| `installed` | Installed on this machine (from Sync Skills, stored in browser) |
+| `open` | On the market, not installed, not disabled |
+| `pending` | A link you added manually, awaiting the next routine to enrich |
+| `disabled` | You disabled it — bulk **Sync Skills** skips it (still manually syncable) |
 
-## 本地运行
+## Local actions (full-auto, local only)
+**Sync Skills** installs/updates every non-disabled git skill on your machine;
+per-row **sync** / **upgrade** / **delete** act on one skill (delete removes its
+`~/.claude/skills/<name>` files, with a confirm). These run git on your machine and
+only work locally — on a server they degrade with a clear message. Plugins/MCP can't
+be auto-installed via shell and are reported with the command to run instead.
+
+## Run locally
 ```bash
 npm install
 npm run dev      # http://localhost:3000
-# 或生产：
+# or production:
 npm run build && npm run start
 ```
-- 不需要 `GITHUB_TOKEN`、不需要 login（本地不抓 GitHub）。
-- 点 **Check local skills** 会扫本机 `~/.claude`（skills 目录、`installed_plugins.json`、
-  `known_marketplaces.json`）判断已装与版本——**仅本地运行时有效**。
+- No `GITHUB_TOKEN`, no login (the app does not crawl GitHub locally).
+- **Sync Skills** scans this machine's `~/.claude` (the skills dir,
+  `installed_plugins.json`, `known_marketplaces.json`) to detect installs and versions —
+  **only meaningful when running locally**.
 
-## 更新数据（云端 routine）
-本地没有「crawl now」。要拿新数据：
-1. 把 repo push 到 GitHub。
-2. 按 [`scripts/routine.md`](scripts/routine.md) 用 `/schedule` 建一个每天 08:00 的 routine（或手动触发一次）。
-3. routine pull → 采集三类来源 → 补全 pending → 按 Developer/UIUX 评级 → 写 `data/*.md` → commit & push。
-4. 本地刷新页面即可看到新数据。
+## Updating data (cloud routine)
+There is no local "crawl now". To get fresh data:
+1. Push the repo to GitHub.
+2. Per [`scripts/routine.md`](scripts/routine.md), create a daily 08:00 routine via
+   `/schedule` (or trigger one manually).
+3. The routine: pull → collect 3 sources → enrich pending → rate by Developer/UIUX →
+   write `data/*.md` → commit & push.
+4. Refresh the dashboard locally to see the new data.
 
-## 部署到 Vercel（可选，未来）
-可以部署成只读看板，但注意：
-- **Check local skills** 在服务器上读不到访客的 `~/.claude` → 自动降级提示「仅本地可用」。
-- **加 GitHub link** 需要写 `data/skills.md`，serverless 文件系统只读 → 自动降级提示。
-- 若 `data/*.md` 缺失，各页显示空态而非报错。
+## Deploy to Vercel (optional, future)
+It can be deployed as a read-only board, but note:
+- **Sync Skills / sync / upgrade / delete** can't reach a visitor's `~/.claude` on a
+  server → they degrade to "local only".
+- **Add Skill** needs to write `data/skills.md`; serverless filesystems are read-only
+  → it degrades with a clear message.
+- If `data/*.md` is missing, pages show an empty state instead of erroring.
 
-## 数据格式
-`data/*.md` 是普通 markdown 表（人读 + `lib/db.ts` 可解析）。列规范见各文件首行与
-[`scripts/routine.md`](scripts/routine.md)。
+## Data format
+`data/*.md` are plain markdown tables (human-readable + parsed by `lib/db.ts`). Column
+specs are in each file's first lines and in [`scripts/routine.md`](scripts/routine.md).
 
-## 技术栈
-Next.js 14（App Router, TS）· markdown 当 DB · 无后端数据库 · 无 login。
+## Stack
+Next.js 14 (App Router, TS) · markdown as the database · no backend DB · no login.
 
-> 注：`npm audit` 可能提示需升级到 Next 16 才能清掉的告警；Next 16 要求 Node 20+。本工具为本地看板、
-> 无不可信输入，暂留在 Next 14.2.x（兼容 Node 18.17）。要清告警就升 Node 20 + `npm i next@latest`。
+> Note: `npm audit` may flag advisories only fixable by upgrading to Next 16, which
+> requires Node 20+. As a local board with no untrusted input, this stays on Next 14.2.x
+> (compatible with Node 18.17). To clear them, move to Node 20 + `npm i next@latest`.

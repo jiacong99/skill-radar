@@ -26,3 +26,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# private, per-machine data — never pushed to the public repo
+data/local-skills.md
+data/local-dirs.md
+data/searched.md

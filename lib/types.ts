@@ -1,54 +1,63 @@
-// Shared types. "Common" data lives in markdown (data/*.md); personal data
-// (installed?, ignore/keep-track, role) lives in the browser (localStorage).
+// Shared types. Skill Radar is skills-only and local-first.
+//
+// Three sources of skills feed one unified table:
+//  - installed : scanned live from each agent provider's skills dir (personal;
+//                derived from disk, never written to the repo)
+//  - whitelist : curated in data/whitelist.md, hand-edited by the maintainer only
+//                (no create/edit in the UI)
+//  - searched  : GitHub results the user looked at but didn't install, kept in the
+//                private, gitignored data/searched.md
 
-export type Role = "developer" | "uiux";
+export type SkillCategory = "installed" | "whitelist" | "searched";
 
-// Importance dots set by the cloud routine, per role.
-// ⚫️ critical · 🟠 high · 🔵 medium · 🟢 low · "" unrated
-export type Importance = "⚫️" | "🟠" | "🔵" | "🟢" | "";
-
-// Raw status stored in markdown. "" = normal (live status computed at runtime),
-// "pending" = user-added link awaiting routine enrichment.
-export type RawStatus = "" | "pending";
-
-// Final status shown in the UI (computed from common + personal state).
-export type Status = "pending" | "active" | "cancelled" | "expired" | "open" | "unknown";
-
-export interface SkillRow {
+// A skill curated in data/whitelist.md. Audience tags say who it suits
+// (PM / BA / SE / QA …) and are free text — maintained by editing the file only.
+export interface WhitelistSkill {
   name: string;
-  github_path: string; // owner/repo or full URL
-  stars: number;
+  github_path: string; // owner/repo (may be empty)
   description: string;
-  last_update: string; // ISO date, e.g. 2026-06-20
-  latest_version: string;
-  importance_developer: Importance;
-  importance_uiux: Importance;
-  status: RawStatus;
-  // kind helps the "sync" action suggest the right install command.
-  kind: "plugin" | "skill" | "mcp" | ""; // "" = unknown
+  tags: string[]; // audience tags, free text
+  remark: string; // maintainer note
 }
 
-export interface RepoRow {
+// One skill found installed on this machine, scanned from a provider's dir.
+export interface InstalledSkill {
+  name: string;
+  version: string; // best-effort from SKILL.md frontmatter / plugins json ("" if unknown)
+  description: string; // best-effort from SKILL.md ("" if unknown)
+  provider: string; // provider id, e.g. "claude"
+  providerLabel: string; // e.g. "Claude Code"
+  dir: string; // absolute path to the skill folder (used by the delete guide)
+  source: "skill" | "plugin";
+  github_path: string; // "" if unknown (resolved for plugins via known_marketplaces)
+}
+
+// A GitHub result the user saved without installing. Private (gitignored).
+export interface SearchedSkill {
+  name: string;
+  github_path: string; // owner/repo
+  description: string;
+  stars: number;
+  remark: string; // e.g. why not installing
+  saved_at: string; // ISO date
+}
+
+// One row in the unified skills table. Merged from the three sources at render time.
+export interface SkillView {
   name: string;
   github_path: string;
-  stars: number;
   description: string;
-  last_update: string;
-  importance_developer: Importance;
-  importance_uiux: Importance;
-}
-
-export interface NewsItem {
-  title: string;
-  url: string;
-  source: string;
-  date: string;
-  summary: string;
-}
-
-// Personal install info returned by /api/local-skills (local only).
-export interface LocalSkillInfo {
+  category: SkillCategory;
   installed: boolean;
-  version: string; // best-effort local version, "" if unknown
+  // present when installed:
+  provider?: string;
+  providerLabel?: string;
+  dir?: string;
+  version?: string;
+  source?: "skill" | "plugin";
+  // whitelist-only:
+  tags: string[];
+  // stars from a searched entry, if any:
+  stars: number;
+  remark: string;
 }
-export type LocalSkillMap = Record<string, LocalSkillInfo>; // keyed by skill name (lowercased)

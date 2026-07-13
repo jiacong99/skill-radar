@@ -1,18 +1,12 @@
-// Local install detection — LOCAL ONLY. Scans the current machine's
-// ~/.claude install to decide whether each catalog skill is installed and at
-// what version. This is *personal* data, so it never touches markdown — the
-// API returns it to the browser, which caches it in localStorage.
-//
-// On a server (e.g. Vercel) there is no user ~/.claude, so detection reports
-// "unavailable" and the UI degrades gracefully.
+// Local install detection — SERVER ONLY. Scans each detected provider's skills
+// dir for installed skills (+ Claude plugins), enriched with SKILL.md metadata.
+// This is personal data derived live from disk; it's never written to the repo.
 
 import fs from "fs";
-import os from "os";
 import path from "path";
-import type { SkillRow, LocalSkillMap } from "./types";
+import type { InstalledSkill } from "./types";
 import { normalizePath } from "./db";
-
-const CLAUDE_DIR = path.join(os.homedir(), ".claude");
+import { detectedProviders, type Provider } from "./providers";
 
 function safeJson(file: string): any {
   try {
@@ -33,85 +27,97 @@ function safeDirs(dir: string): string[] {
   }
 }
 
-export function claudeAvailable(): boolean {
+// Read a skill's SKILL.md frontmatter for version + description (no network).
+function readSkillMeta(dir: string): { version: string; description: string } {
   try {
-    return fs.statSync(CLAUDE_DIR).isDirectory();
+    const txt = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+    const lines = txt.split(/\r?\n/);
+    let start = -1, end = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === "---") { if (start < 0) start = i; else { end = i; break; } }
+    }
+    const fm = start >= 0 && end > start ? lines.slice(start + 1, end) : lines.slice(0, 40);
+    let version = "", description = "";
+    for (const ln of fm) {
+      const v = ln.match(/^version:\s*(.+)$/i);
+      const d = ln.match(/^description:\s*(.+)$/i);
+      if (v && !version) version = v[1].trim().replace(/^["']|["']$/g, "");
+      if (d && !description) description = d[1].trim().replace(/^["']|["']$/g, "").slice(0, 240);
+    }
+    return { version, description };
   } catch {
-    return false;
+    return { version: "", description: "" };
   }
 }
 
-interface LocalIndex {
-  repoToVersion: Map<string, string>; // "owner/repo" (lower) -> version ("" if unknown)
-  names: Map<string, string>; // skill/plugin/marketplace name (lower) -> version
-}
+// Claude plugins: name -> { version, repo }, resolved via known_marketplaces + installed_plugins.
+function claudePlugins(pluginsDir: string): Map<string, { version: string; repo: string }> {
+  const out = new Map<string, { version: string; repo: string }>();
+  const marketRepo = new Map<string, string>(); // marketplace name(lower) -> owner/repo
+  const km = safeJson(path.join(pluginsDir, "known_marketplaces.json"));
+  if (km && typeof km === "object")
+    for (const [m, info] of Object.entries<any>(km))
+      if (info?.source?.repo) marketRepo.set(m.toLowerCase(), normalizePath(info.source.repo));
 
-function buildIndex(): LocalIndex {
-  const repoToVersion = new Map<string, string>();
-  const names = new Map<string, string>();
-
-  // 1) marketplaces: name -> github repo
-  const marketRepo = new Map<string, string>(); // marketplace name(lower) -> repo(lower)
-  const km = safeJson(path.join(CLAUDE_DIR, "plugins", "known_marketplaces.json"));
-  if (km && typeof km === "object") {
-    for (const [mName, info] of Object.entries<any>(km)) {
-      const repo = info?.source?.repo ? normalizePath(info.source.repo).toLowerCase() : "";
-      if (repo) {
-        marketRepo.set(mName.toLowerCase(), repo);
-        repoToVersion.set(repo, ""); // installed, version unknown until plugins json fills it
-      }
-      names.set(mName.toLowerCase(), "");
-    }
-  }
-
-  // 2) installed plugins: "plugin@marketplace" -> version
-  const ip = safeJson(path.join(CLAUDE_DIR, "plugins", "installed_plugins.json"));
-  const plugins = ip?.plugins;
-  if (plugins && typeof plugins === "object") {
-    for (const [key, entries] of Object.entries<any>(plugins)) {
+  const ip = safeJson(path.join(pluginsDir, "installed_plugins.json"));
+  if (ip?.plugins && typeof ip.plugins === "object")
+    for (const [key, entries] of Object.entries<any>(ip.plugins)) {
+      const [plugin, market] = key.split("@");
+      if (!plugin) continue;
       const version = Array.isArray(entries) && entries[0]?.version ? String(entries[0].version) : "";
-      const [pluginName, marketName] = key.split("@");
-      if (pluginName) names.set(pluginName.toLowerCase(), version);
-      if (marketName) {
-        names.set(marketName.toLowerCase(), version);
-        const repo = marketRepo.get(marketName.toLowerCase());
-        if (repo) repoToVersion.set(repo, version);
-      }
+      const repo = market ? marketRepo.get(market.toLowerCase()) || "" : "";
+      out.set(plugin.toLowerCase(), { version, repo });
     }
-  }
-
-  // 3) skill directories under ~/.claude/skills (name-based, version unknown)
-  for (const d of safeDirs(path.join(CLAUDE_DIR, "skills"))) {
-    if (!names.has(d.toLowerCase())) names.set(d.toLowerCase(), "");
-  }
-
-  return { repoToVersion, names };
+  return out;
 }
 
-// Match each catalog skill against the local index. Keyed by skill name.
-export function detectLocalSkills(skills: SkillRow[]): LocalSkillMap {
-  const idx = buildIndex();
-  const map: LocalSkillMap = {};
-  for (const s of skills) {
-    const repo = normalizePath(s.github_path).toLowerCase();
-    const repoName = repo.split("/").pop() || "";
-    const nameKey = s.name.toLowerCase();
+function scanProvider(p: Provider): InstalledSkill[] {
+  const out = new Map<string, InstalledSkill>();
 
-    let installed = false;
-    let version = "";
-
-    if (repo && idx.repoToVersion.has(repo)) {
-      installed = true;
-      version = idx.repoToVersion.get(repo) || "";
-    }
-    for (const k of [nameKey, repoName]) {
-      if (k && idx.names.has(k)) {
-        installed = true;
-        if (!version) version = idx.names.get(k) || "";
-      }
-    }
-
-    map[s.name] = { installed, version };
+  // 1) Claude plugins (only Claude tracks these).
+  const plugins = p.pluginsDir ? claudePlugins(p.pluginsDir) : new Map();
+  for (const [name, info] of plugins) {
+    out.set(name, {
+      name, version: info.version, description: "", provider: p.id, providerLabel: p.label,
+      dir: path.join(p.skillsDir, name), source: "plugin", github_path: info.repo,
+    });
   }
-  return map;
+
+  // 2) skill directories under the provider's skills dir.
+  for (const d of safeDirs(p.skillsDir)) {
+    if (d.startsWith(".") || d.startsWith("_")) continue;
+    const dir = path.join(p.skillsDir, d);
+    const meta = readSkillMeta(dir);
+    const ex = out.get(d.toLowerCase());
+    if (ex) {
+      out.set(d.toLowerCase(), { ...ex, dir, version: ex.version || meta.version, description: ex.description || meta.description });
+    } else {
+      out.set(d.toLowerCase(), {
+        name: d, version: meta.version, description: meta.description, provider: p.id,
+        providerLabel: p.label, dir, source: "skill", github_path: "",
+      });
+    }
+  }
+
+  return Array.from(out.values());
+}
+
+// Every installed skill across every detected provider. Deduped by lowercased
+// name (first provider wins), so the same skill in two runners shows once.
+export function listInstalledSkills(): InstalledSkill[] {
+  const seen = new Set<string>();
+  const out: InstalledSkill[] = [];
+  for (const p of detectedProviders()) {
+    for (const s of scanProvider(p)) {
+      const key = s.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function anyProviderDetected(): boolean {
+  return detectedProviders().length > 0;
 }
