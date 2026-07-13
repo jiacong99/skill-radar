@@ -257,8 +257,11 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; colo
 .cat-searched { color: var(--info); background: rgba(135, 84, 236, .13); }
 
 /* ============ audience tags ============ */
-.tags-cell { display: flex; flex-wrap: wrap; gap: 5px; max-width: 180px; }
-.tag { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+/* Keep the cell a normal table cell (so it honors vertical-align:top like the
+   other columns); the flex/wrap lives on an inner wrapper. */
+td.tags-cell { max-width: 200px; }
+.tags-cell .tags { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
+.tag { font-family: var(--font-mono); font-size: 11px; font-weight: 600; line-height: 1.5; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
 .skill-cell .s-ver .prov { color: var(--ink); }
 .skill-cell .s-ver .ver-num { color: var(--muted); }
 

@@ -191,7 +191,9 @@ export default function SkillsClient({ views, providers, detected }: { views: Sk
                     </td>
                     <td className="nowrap"><span className={`cat cat-${s.category}`} title={tr(`cat.${s.category}.t`)}>{tr(`cat.${s.category}`)}</span></td>
                     <td className="tags-cell">
-                      {s.tags.length ? s.tags.map((tg) => <span key={tg} className="tag">{tg}</span>) : <span className="dim">—</span>}
+                      <div className="tags">
+                        {s.tags.length ? s.tags.map((tg) => <span key={tg} className="tag">{tg}</span>) : <span className="dim">—</span>}
+                      </div>
                     </td>
                     <td className="desc">
                       {s.description || <span className="dim">—</span>}
