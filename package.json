@@ -1,12 +1,12 @@
 {
   "name": "skill-radar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Skill Radar — AI 情报 Dashboard (skills / repos / news)",
+  "description": "Skill Radar — a local-first dashboard for your AI agent skills (detect installed · maintain a whitelist · search GitHub · install)",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 5959",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 5959",
     "lint": "next lint"
   },
   "dependencies": {
